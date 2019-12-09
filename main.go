@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/aws/aws-sdk-go/aws"
 	awsSession "github.com/aws/aws-sdk-go/aws/session"
@@ -19,6 +21,8 @@ import (
 var region = "eu-west-1"
 
 func main() {
+	SetupSignalHandlers()
+
 	app := &cli.App{
 		Name:   "amz-ssh",
 		Usage:  "connect to an ec2 instance via ec2 connect",
@@ -50,6 +54,16 @@ func main() {
 		log.Fatal(err)
 
 	}
+}
+
+func SetupSignalHandlers() {
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		fmt.Println("\nGoodbye!")
+		os.Exit(0)
+	}()
 }
 
 func run(c *cli.Context) error {
