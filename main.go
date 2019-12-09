@@ -11,12 +11,14 @@ import (
 	awsSession "github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	connect "github.com/aws/aws-sdk-go/service/ec2instanceconnect"
+	"github.com/blang/semver"
+	sshutils "github.com/nodefortytwo/amz-ssh/pkg/sshutils"
+	"github.com/rhysd/go-github-selfupdate/selfupdate"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2" // imports as package "cli"
-
-	sshutils "github.com/nodefortytwo/amz-ssh/pkg/sshutils"
 )
 
+var version = "0.0.0"
 var region = "eu-west-1"
 
 func main() {
@@ -54,6 +56,13 @@ func main() {
 				Name:        "port",
 				Aliases:     []string{"p"},
 				DefaultText: "local port to map to, defaults to tunnel port",
+			},
+		},
+		Commands: []*cli.Command{
+			{
+				Name:   "update",
+				Usage:  "Update the cli",
+				Action: update,
 			},
 		},
 	}
@@ -190,4 +199,22 @@ func connectClient() *connect.EC2InstanceConnect {
 	}
 
 	return connect.New(sess)
+}
+
+func update(c *cli.Context) error {
+	v := semver.MustParse(version)
+	latest, err := selfupdate.UpdateSelf(v, "nodefortytwo/amz-ssh")
+	if err != nil {
+		log.Println("Binary update failed:", err)
+		return nil
+	}
+	if latest.Version.Equals(v) {
+		// latest version is the same as current version. It means current binary is up to date.
+		log.Println("Current binary is the latest version", version)
+	} else {
+		log.Println("Successfully updated to version", latest.Version)
+		log.Println("Release note:\n", latest.ReleaseNotes)
+	}
+
+	return nil
 }
