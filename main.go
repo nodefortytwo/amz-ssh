@@ -13,6 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2" // imports as package "cli"
 	"os"
+	"time"
 )
 
 var version = "v0.0.0"
@@ -100,10 +101,18 @@ func run(c *cli.Context) error {
 		return err
 	}
 	user := c.String("user")
+
 	err = sendPublicKey(instance, user, publicKey)
 	if err != nil {
-		return err
+		log.Fatal(err)
 	}
+
+	go doEvery(60*time.Second, func(t time.Time) {
+		err = sendPublicKey(instance, user, publicKey)
+		if err != nil {
+			log.Fatal(err)
+		}
+	})
 
 	bastionEndpoint := sshutils.NewEndpoint(aws.StringValue(instance.PublicIpAddress))
 	bastionEndpoint.User = user
@@ -202,4 +211,10 @@ func update(c *cli.Context) error {
 	}
 
 	return nil
+}
+
+func doEvery(d time.Duration, f func(time.Time)) {
+	for x := range time.Tick(d) {
+		f(x)
+	}
 }
