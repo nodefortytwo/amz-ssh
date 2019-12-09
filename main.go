@@ -16,14 +16,15 @@ import (
 	"time"
 )
 
-var version = "v0.0.0"
+var version = "0.0.0"
 var region = "eu-west-1"
 
 func main() {
 	app := &cli.App{
-		Name:   "amz-ssh",
-		Usage:  "connect to an ec2 instance via ec2 connect",
-		Action: run,
+		Name:    "amz-ssh",
+		Usage:   "connect to an ec2 instance via ec2 connect",
+		Version: version,
+		Action:  run,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:        "region",
@@ -196,7 +197,7 @@ func connectClient() *connect.EC2InstanceConnect {
 }
 
 func update(c *cli.Context) error {
-	v := semver.MustParse(version)
+	v := semver.MustParse(c.App.Version)
 	latest, err := selfupdate.UpdateSelf(v, "nodefortytwo/amz-ssh")
 	if err != nil {
 		log.Println("Binary update failed:", err)
