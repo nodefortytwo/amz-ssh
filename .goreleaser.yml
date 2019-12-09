@@ -5,9 +5,10 @@ before:
     # you may remove this if you don't use vgo
     - go mod tidy
 builds:
-- env:
+- id: amz-ssh
+  env:
     - CGO_ENABLED=0
- ldflags:
+  ldflags:
     - -s -w -X main.version={{.Version}}
 archives:
 - replacements:
@@ -20,6 +21,8 @@ checksum:
   name_template: 'checksums.txt'
 snapshot:
   name_template: "{{ .Tag }}-next"
+release:
+  prerelease: auto
 changelog:
   sort: asc
   filters:
