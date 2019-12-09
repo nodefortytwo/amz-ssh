@@ -13,7 +13,6 @@ import (
 	connect "github.com/aws/aws-sdk-go/service/ec2instanceconnect"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2" // imports as package "cli"
-	"golang.org/x/crypto/ssh"
 
 	sshutils "github.com/nodefortytwo/amz-ssh/pkg/sshutils"
 )
@@ -21,7 +20,7 @@ import (
 var region = "eu-west-1"
 
 func main() {
-	SetupSignalHandlers()
+	// SetupSignalHandlers()
 
 	app := &cli.App{
 		Name:   "amz-ssh",
@@ -45,6 +44,16 @@ func main() {
 				Aliases:     []string{"u"},
 				DefaultText: "os user of bastion",
 				Value:       "ec2-user",
+			},
+			&cli.StringFlag{
+				Name:        "tunnel",
+				Aliases:     []string{"t"},
+				DefaultText: "Host to tunnel to",
+			},
+			&cli.IntFlag{
+				Name:        "port",
+				Aliases:     []string{"p"},
+				DefaultText: "local port to map to, defaults to tunnel port",
 			},
 		},
 	}
@@ -102,57 +111,19 @@ func run(c *cli.Context) error {
 		return err
 	}
 
-	return SSHConnect(aws.StringValue(instance.PublicIpAddress), user, privateKey)
-}
+	bastionEndpoint := sshutils.NewEndpoint(aws.StringValue(instance.PublicIpAddress))
+	bastionEndpoint.User = user
+	bastionEndpoint.PrivateKey = privateKey
 
-func SSHConnect(ip, user, privateKey string) error {
-
-	key, err := ssh.ParsePrivateKey([]byte(privateKey))
-	if err != nil {
-		return nil
+	if tunnel := sshutils.NewEndpoint(c.String("tunnel")); tunnel.Host != "" {
+		p := c.Int("port")
+		if p == 0 {
+			p = tunnel.Port
+		}
+		return sshutils.Tunnel(p, tunnel, bastionEndpoint)
 	}
 
-	sshConfig := &ssh.ClientConfig{
-		User: user,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(key),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-	}
-
-	client, err := ssh.Dial("tcp", ip+":22", sshConfig)
-	if err != nil {
-		return fmt.Errorf("failed to dial: %s", err)
-	}
-
-	sess, err := client.NewSession()
-	if err != nil {
-		return fmt.Errorf("failed to create new session: %s", err)
-	}
-	defer sess.Close()
-
-	// Set IO
-	sess.Stdout = os.Stdout
-	sess.Stderr = os.Stderr
-	sess.Stdin = os.Stdin
-
-	modes := ssh.TerminalModes{
-		ssh.ECHO:          0,     // disable echoing
-		ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
-		ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
-	}
-
-	if err := sess.RequestPty("xterm", 80, 40, modes); err != nil {
-		log.Fatalf("request for pseudo terminal failed: %s", err)
-	}
-
-	if err := sess.Shell(); err != nil {
-		log.Fatalf("failed to start shell: %s", err)
-	}
-
-	sess.Wait()
-
-	return nil
+	return sshutils.Connect(bastionEndpoint)
 }
 
 func sendPublicKey(instance *ec2.Instance, user, publicKey string) error {
