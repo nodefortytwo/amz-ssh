@@ -54,7 +54,7 @@ func main() {
 				Aliases:     []string{"t"},
 				DefaultText: "Host to tunnel to",
 			},
-			&cli.StringFlag{
+			&cli.StringSliceFlag{
 				Name:        "destination",
 				Aliases:     []string{"d"},
 				DefaultText: "destination to ssh to. multiple instances can be delimited by a comma",
@@ -113,15 +113,13 @@ func run(c *cli.Context) error {
 		bastionEndpoint,
 	}
 
-	if dest := c.String("destination"); dest != "" {
-		for _, ep := range strings.Split(dest, ",") {
-			destEndpoint, err := sshutils.NewEC2Endpoint(ep, ec2Client(), connectClient())
-			if err != nil {
-				return err
-			}
-			destEndpoint.UsePrivate = true
-			chain = append(chain, destEndpoint)
+	for _, ep := range c.StringSlice("destination") {
+		destEndpoint, err := sshutils.NewEC2Endpoint(ep, ec2Client(), connectClient())
+		if err != nil {
+			return err
 		}
+		destEndpoint.UsePrivate = true
+		chain = append(chain, destEndpoint)
 	}
 
 	return sshutils.Connect(chain...)
