@@ -61,16 +61,35 @@ func forward(remoteHost, bastionEndpoint EndpointIface, localConn net.Conn) {
 	go copyConn(remoteConn, localConn)
 }
 
-func Connect(bastionEndpoint EndpointIface) error {
+func Connect(bastionEndpoints ...EndpointIface) error {
 
-	sshConfig, err := bastionEndpoint.GetSSHConfig()
-	if err != nil {
-		return nil
-	}
+	var client *ssh.Client
+	for _, bastionEndpoint := range bastionEndpoints {
+		sshConfig, err := bastionEndpoint.GetSSHConfig()
+		if err != nil {
+			return nil
+		}
 
-	client, err := ssh.Dial("tcp", bastionEndpoint.String(), sshConfig)
-	if err != nil {
-		return fmt.Errorf("failed to dial: %s", err)
+		serviceAddr := bastionEndpoint.String()
+		log.Infof("Attempting to connect to %s", serviceAddr)
+		// Tf this is the first endpint in the chain, create a new client
+		// Otherwise use the previous ssh client
+		if client == nil {
+			client, err = ssh.Dial("tcp", serviceAddr, sshConfig)
+			if err != nil {
+				return fmt.Errorf("failed to dial: %s", err)
+			}
+		} else {
+			conn, err := client.Dial("tcp", serviceAddr)
+			if err != nil {
+				return fmt.Errorf("failed to dial: %s", err)
+			}
+			ncc, chans, reqs, err := ssh.NewClientConn(conn, serviceAddr, sshConfig)
+			if err != nil {
+				return fmt.Errorf("failed to create new ssh connection to %s: %s", serviceAddr, err)
+			}
+			client = ssh.NewClient(ncc, chans, reqs)
+		}
 	}
 
 	sess, err := client.NewSession()

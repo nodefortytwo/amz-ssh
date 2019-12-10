@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -53,6 +54,11 @@ func main() {
 				Aliases:     []string{"t"},
 				DefaultText: "Host to tunnel to",
 			},
+			&cli.StringFlag{
+				Name:        "destination",
+				Aliases:     []string{"d"},
+				DefaultText: "destination to ssh to. multiple instances can be delimited by a comma",
+			},
 			&cli.IntFlag{
 				Name:        "port",
 				Aliases:     []string{"p"},
@@ -85,28 +91,12 @@ func SetupSignalHandlers() {
 }
 
 func run(c *cli.Context) error {
-	instanceID := c.String("instance-id")
-	if instanceID == "" {
-		log.Info("Looking for bastion spot request")
-		siro, err := getSpotRequestByRole("bastion")
-		if err != nil {
-			return err
-		}
-
-		if len(siro.SpotInstanceRequests) > 0 {
-			instanceID = aws.StringValue(siro.SpotInstanceRequests[0].InstanceId)
-		} else {
-			return errors.New("unable to find any valid bastion instances")
-		}
-	}
-
-	privateKey, publicKey, err := sshutils.GenerateKeys()
+	instanceID, err := resolveBastionInstanceID(c.String("instance-id"))
 	if err != nil {
 		return err
 	}
-	user := c.String("user")
 
-	bastionEndpoint, err := sshutils.NewEC2Endpoint(instanceID, user, privateKey, publicKey, ec2Client(), connectClient())
+	bastionEndpoint, err := sshutils.NewEC2Endpoint(fmt.Sprintf("%s@%s", c.String("user"), instanceID), ec2Client(), connectClient())
 	if err != nil {
 		return err
 	}
@@ -119,7 +109,22 @@ func run(c *cli.Context) error {
 		return sshutils.Tunnel(p, tunnel, bastionEndpoint)
 	}
 
-	return sshutils.Connect(bastionEndpoint)
+	chain := []sshutils.EndpointIface{
+		bastionEndpoint,
+	}
+
+	if dest := c.String("destination"); dest != "" {
+		for _, ep := range strings.Split(dest, ",") {
+			destEndpoint, err := sshutils.NewEC2Endpoint(ep, ec2Client(), connectClient())
+			if err != nil {
+				return err
+			}
+			destEndpoint.UsePrivate = true
+			chain = append(chain, destEndpoint)
+		}
+	}
+
+	return sshutils.Connect(chain...)
 }
 
 func getSpotRequestByRole(role string) (*ec2.DescribeSpotInstanceRequestsOutput, error) {
@@ -139,6 +144,27 @@ func getSpotRequestByRole(role string) (*ec2.DescribeSpotInstanceRequestsOutput,
 			},
 		},
 	})
+}
+
+func resolveBastionInstanceID(instanceID string) (string, error) {
+	if instanceID != "" {
+		return instanceID, nil
+	}
+
+	log.Info("Looking for bastion spot request")
+	siro, err := getSpotRequestByRole("bastion")
+	if err != nil {
+		return "", err
+	}
+
+	if len(siro.SpotInstanceRequests) > 0 {
+		return aws.StringValue(siro.SpotInstanceRequests[0].InstanceId), nil
+	}
+
+	return "", errors.New("unable to find any valid bastion instances")
+
+	// TODO: look for instance directly by tag
+	// TODO: look for asg by tag
 }
 
 func ec2Client() *ec2.EC2 {
