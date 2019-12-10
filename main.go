@@ -2,18 +2,18 @@ package main
 
 import (
 	"errors"
-	"fmt"
+	"os"
+
 	"github.com/aws/aws-sdk-go/aws"
 	awsSession "github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	connect "github.com/aws/aws-sdk-go/service/ec2instanceconnect"
 	"github.com/blang/semver"
-	sshutils "github.com/nodefortytwo/amz-ssh/pkg/sshutils"
 	"github.com/rhysd/go-github-selfupdate/selfupdate"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2" // imports as package "cli"
-	"os"
-	"time"
+
+	"github.com/nodefortytwo/amz-ssh/pkg/sshutils"
 )
 
 var version = "0.0.0"
@@ -86,16 +86,6 @@ func run(c *cli.Context) error {
 			return errors.New("unable to find any valid bastion instances")
 		}
 	}
-	log.Infof("Instance id: %s", instanceID)
-	instanceOutput, err := getInstance(instanceID)
-	if err != nil {
-		return err
-	}
-	if len(instanceOutput.Reservations) == 0 || len(instanceOutput.Reservations[0].Instances) == 0 {
-		return errors.New("instance not found")
-	}
-
-	instance := instanceOutput.Reservations[0].Instances[0]
 
 	privateKey, publicKey, err := sshutils.GenerateKeys()
 	if err != nil {
@@ -103,21 +93,13 @@ func run(c *cli.Context) error {
 	}
 	user := c.String("user")
 
-	err = sendPublicKey(instance, user, publicKey)
+	bastionEndpoint, err := sshutils.NewEC2Endpoint(instanceID, user, privateKey, publicKey, ec2Client(), connectClient())
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-
-	go doEvery(60*time.Second, func(t time.Time) {
-		err = sendPublicKey(instance, user, publicKey)
-		if err != nil {
-			log.Fatal(err)
-		}
-	})
-
-	bastionEndpoint := sshutils.NewEndpoint(aws.StringValue(instance.PublicIpAddress))
 	bastionEndpoint.User = user
 	bastionEndpoint.PrivateKey = privateKey
+	bastionEndpoint.PublicKey = publicKey
 
 	if tunnel := sshutils.NewEndpoint(c.String("tunnel")); tunnel.Host != "" {
 		p := c.Int("port")
@@ -128,31 +110,6 @@ func run(c *cli.Context) error {
 	}
 
 	return sshutils.Connect(bastionEndpoint)
-}
-
-func sendPublicKey(instance *ec2.Instance, user, publicKey string) error {
-
-	out, err := connectClient().SendSSHPublicKey(&connect.SendSSHPublicKeyInput{
-		AvailabilityZone: instance.Placement.AvailabilityZone,
-		InstanceId:       instance.InstanceId,
-		InstanceOSUser:   aws.String(user),
-		SSHPublicKey:     aws.String(publicKey),
-	})
-	if err != nil {
-		return err
-	}
-
-	if !*out.Success {
-		return fmt.Errorf("request failed but no error was returned. Request ID: %s", aws.StringValue(out.RequestId))
-	}
-
-	return nil
-}
-
-func getInstance(id string) (*ec2.DescribeInstancesOutput, error) {
-	return ec2Client().DescribeInstances(&ec2.DescribeInstancesInput{
-		InstanceIds: []*string{aws.String(id)},
-	})
 }
 
 func getSpotRequestByRole(role string) (*ec2.DescribeSpotInstanceRequestsOutput, error) {
@@ -212,10 +169,4 @@ func update(c *cli.Context) error {
 	}
 
 	return nil
-}
-
-func doEvery(d time.Duration, f func(time.Time)) {
-	for x := range time.Tick(d) {
-		f(x)
-	}
 }

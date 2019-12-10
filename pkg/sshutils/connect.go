@@ -12,7 +12,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func Tunnel(localPort int, remoteHost Endpoint, bastionHost Endpoint) error {
+func Tunnel(localPort int, remoteHost EndpointIface, bastionHost EndpointIface) error {
 	log.Debug("Opening tunnel")
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", "localhost", localPort))
@@ -31,24 +31,26 @@ func Tunnel(localPort int, remoteHost Endpoint, bastionHost Endpoint) error {
 	}
 }
 
-func forward(remoteHost, bastionHost Endpoint, localConn net.Conn) {
-	sshConfig, err := getSSHConfig(bastionHost)
+func forward(remoteHost, bastionEndpoint EndpointIface, localConn net.Conn) {
+	sshConfig, err := bastionEndpoint.GetSSHConfig()
 	if err != nil {
 		log.Error(err)
 	}
 
-	serverConn, err := ssh.Dial("tcp", bastionHost.String(), sshConfig)
+	serverConn, err := ssh.Dial("tcp", bastionEndpoint.String(), sshConfig)
 	if err != nil {
 		log.Errorf("server dial error: %s", err)
 		return
 	}
-	log.Debugf("connected to %s (1 of 2)\n", bastionHost.String())
+	log.Debugf("connected to %s (1 of 2)", bastionEndpoint.String())
+
 	remoteConn, err := serverConn.Dial("tcp", remoteHost.String())
 	if err != nil {
 		log.Errorf("remote dial error: %s", err)
 		return
 	}
-	log.Debugf("connected to %s (2 of 2)\n", remoteHost.String())
+	log.Debugf("connected to %s (2 of 2)", remoteHost.String())
+
 	copyConn := func(writer, reader net.Conn) {
 		_, err := io.Copy(writer, reader)
 		if err != nil {
@@ -59,14 +61,14 @@ func forward(remoteHost, bastionHost Endpoint, localConn net.Conn) {
 	go copyConn(remoteConn, localConn)
 }
 
-func Connect(bastionHost Endpoint) error {
+func Connect(bastionEndpoint EndpointIface) error {
 
-	sshConfig, err := getSSHConfig(bastionHost)
+	sshConfig, err := bastionEndpoint.GetSSHConfig()
 	if err != nil {
 		return nil
 	}
 
-	client, err := ssh.Dial("tcp", bastionHost.String(), sshConfig)
+	client, err := ssh.Dial("tcp", bastionEndpoint.String(), sshConfig)
 	if err != nil {
 		return fmt.Errorf("failed to dial: %s", err)
 	}
@@ -113,19 +115,4 @@ func Connect(bastionHost Endpoint) error {
 	}
 
 	return sess.Wait()
-}
-
-func getSSHConfig(ep Endpoint) (*ssh.ClientConfig, error) {
-	key, err := ssh.ParsePrivateKey([]byte(ep.PrivateKey))
-	if err != nil {
-		return nil, err
-	}
-
-	return &ssh.ClientConfig{
-		User: ep.User,
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(key),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-	}, nil
 }
