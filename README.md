@@ -27,7 +27,7 @@ Tunnel through the default bastion
 
 `amz-ssh -t somedatabase.example.com:5432`
 
-SSH to another host after connecting to the bastion
+SSH to another host via the bastion
 
 `amz-ssh -d i-0eaa4d1c7f350216e`
 
