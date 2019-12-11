@@ -12,16 +12,20 @@ a tool that replaces aws/aws-ec2-instance-connect-cli.
 
 ## How to use
 
+`amz-ssh` is designed to be run in an already authenticated environment eg via `aws-vault`.
+
 Connect to a bastion launched by a spot request with a tag `role:bastion` in `eu-west-1
 `
 
-`amz-ssh` is designed to be run in an already authenticated environment eg via `aws-vault`.
-
 `aws-vault exec {profile} -- amz-ssh`
 
-Connect to a specifc a specific instance
+Connect to a specific a specific instance
 
 `amz-ssh -i i-0eaa4d1c7f350216e`
+
+Connect to a bastion with the tag `job:bastion-special`
+
+`amz-ssh -t job:bastion-special`
 
 Tunnel through the default bastion
 

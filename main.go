@@ -3,10 +3,12 @@ package main
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	awsSession "github.com/aws/aws-sdk-go/aws/session"
@@ -24,6 +26,7 @@ var version = "0.0.0"
 var region = "eu-west-1"
 
 func main() {
+	rand.Seed(time.Now().Unix())
 	SetupSignalHandlers()
 	app := &cli.App{
 		Name:    "amz-ssh",
@@ -36,6 +39,10 @@ func main() {
 				Aliases:     []string{"r"},
 				Destination: &region,
 				Value:       "eu-west-1",
+			},
+			&cli.StringFlag{
+				Name:  "tag",
+				Value: "role:bastion",
 			},
 			&cli.StringFlag{
 				Name:        "instance-id",
@@ -60,8 +67,13 @@ func main() {
 				DefaultText: "destination to ssh to. multiple instances can be delimited by a comma",
 			},
 			&cli.IntFlag{
-				Name:        "port",
-				Aliases:     []string{"p"},
+				Name:    "port",
+				Aliases: []string{"p"},
+				Value:   22,
+			},
+			&cli.IntFlag{
+				Name:        "local-port",
+				Aliases:     []string{"lp"},
 				DefaultText: "local port to map to, defaults to tunnel port",
 			},
 		},
@@ -91,18 +103,28 @@ func SetupSignalHandlers() {
 }
 
 func run(c *cli.Context) error {
-	instanceID, err := resolveBastionInstanceID(c.String("instance-id"))
+	var tagName string
+	var tagValue string
+
+	if parts := strings.Split(c.String("tag"), ":"); len(parts) == 2 {
+		tagName = parts[0]
+		tagValue = parts[1]
+	} else {
+		return fmt.Errorf("%s is not a valid tag definition, use key:value", c.String("tag"))
+	}
+
+	instanceID, err := resolveBastionInstanceID(c.String("instance-id"), tagName, tagValue)
 	if err != nil {
 		return err
 	}
-
-	bastionEndpoint, err := sshutils.NewEC2Endpoint(fmt.Sprintf("%s@%s", c.String("user"), instanceID), ec2Client(), connectClient())
+	bastionAddr := fmt.Sprintf("%s@%s:%d", c.String("user"), instanceID, c.Int("port"))
+	bastionEndpoint, err := sshutils.NewEC2Endpoint(bastionAddr, ec2Client(), connectClient())
 	if err != nil {
 		return err
 	}
 
 	if tunnel := sshutils.NewEndpoint(c.String("tunnel")); tunnel.Host != "" {
-		p := c.Int("port")
+		p := c.Int("local-port")
 		if p == 0 {
 			p = tunnel.Port
 		}
@@ -125,12 +147,12 @@ func run(c *cli.Context) error {
 	return sshutils.Connect(chain...)
 }
 
-func getSpotRequestByRole(role string) (*ec2.DescribeSpotInstanceRequestsOutput, error) {
+func getSpotRequestByTag(tagName, tagValue string) (*ec2.DescribeSpotInstanceRequestsOutput, error) {
 	return ec2Client().DescribeSpotInstanceRequests(&ec2.DescribeSpotInstanceRequestsInput{
 		Filters: []*ec2.Filter{
 			{
-				Name:   aws.String("tag:role"),
-				Values: aws.StringSlice([]string{role}),
+				Name:   aws.String("tag:" + tagName),
+				Values: aws.StringSlice([]string{tagValue}),
 			},
 			{
 				Name:   aws.String("state"),
@@ -144,24 +166,48 @@ func getSpotRequestByRole(role string) (*ec2.DescribeSpotInstanceRequestsOutput,
 	})
 }
 
-func resolveBastionInstanceID(instanceID string) (string, error) {
+func getInstanceByTag(tagName, tagValue string) (*ec2.DescribeInstancesOutput, error) {
+	return ec2Client().DescribeInstances(&ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			{
+				Name:   aws.String("tag:" + tagName),
+				Values: aws.StringSlice([]string{tagValue}),
+			},
+			{
+				Name:   aws.String("instance-state-name"),
+				Values: aws.StringSlice([]string{"running"}),
+			},
+		},
+	})
+}
+
+func resolveBastionInstanceID(instanceID, tagName, tagValue string) (string, error) {
 	if instanceID != "" {
 		return instanceID, nil
 	}
 
 	log.Info("Looking for bastion spot request")
-	siro, err := getSpotRequestByRole("bastion")
+	siro, err := getSpotRequestByTag(tagName, tagValue)
 	if err != nil {
 		return "", err
 	}
 
 	if len(siro.SpotInstanceRequests) > 0 {
-		return aws.StringValue(siro.SpotInstanceRequests[0].InstanceId), nil
+		return aws.StringValue(siro.SpotInstanceRequests[rand.Intn(len(siro.SpotInstanceRequests))].InstanceId), nil
+	}
+
+	log.Info("No spot requests found, looking for instance directly")
+	dio, err := getInstanceByTag(tagName, tagValue)
+	if err != nil {
+		return "", err
+	}
+
+	if len(dio.Reservations) > 0 {
+		res := dio.Reservations[rand.Intn(len(dio.Reservations))]
+		return aws.StringValue(res.Instances[rand.Intn(len(res.Instances))].InstanceId), nil
 	}
 
 	return "", errors.New("unable to find any valid bastion instances")
-
-	// TODO: look for instance directly by tag
 	// TODO: look for asg by tag
 }
 
