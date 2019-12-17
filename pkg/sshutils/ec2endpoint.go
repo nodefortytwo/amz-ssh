@@ -1,14 +1,15 @@
 package sshutils
 
 import (
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	connect "github.com/aws/aws-sdk-go/service/ec2instanceconnect"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 )
@@ -94,8 +95,16 @@ func sendPublicKey(instance *ec2.Instance, user, publicKey string, client *conne
 		InstanceOSUser:   aws.String(user),
 		SSHPublicKey:     aws.String(publicKey),
 	})
+
 	if err != nil {
-		return err
+		if awsErr, ok := err.(awserr.Error); ok {
+			if awsErr.Code() == connect.ErrCodeThrottlingException {
+				log.Debug("Got throttling exception, usually just means the key is already valid")
+				return nil
+			}
+		}
+
+		return errors.Wrap(err, "send public key error")
 	}
 
 	if !*out.Success {

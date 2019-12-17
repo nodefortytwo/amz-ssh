@@ -76,6 +76,10 @@ func main() {
 				Aliases:     []string{"lp"},
 				DefaultText: "local port to map to, defaults to tunnel port",
 			},
+			&cli.BoolFlag{
+				Name:        "debug",
+				DefaultText: "Print debug information",
+			},
 		},
 		Commands: []*cli.Command{
 			{
@@ -103,6 +107,10 @@ func SetupSignalHandlers() {
 }
 
 func run(c *cli.Context) error {
+	if c.Bool("debug") {
+		log.SetLevel(log.DebugLevel)
+	}
+
 	var tagName string
 	var tagValue string
 

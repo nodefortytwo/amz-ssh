@@ -5,6 +5,7 @@ go 1.13
 require (
 	github.com/aws/aws-sdk-go v1.25.48
 	github.com/blang/semver v3.5.1+incompatible
+	github.com/pkg/errors v0.8.1
 	github.com/rhysd/go-github-selfupdate v1.1.0
 	github.com/sirupsen/logrus v1.4.2
 	github.com/urfave/cli/v2 v2.0.0
