@@ -9,15 +9,22 @@ a tool that replaces aws/aws-ec2-instance-connect-cli.
 - Detects instance details based on tags, via spot requests
 - supports tunneling
 
+## Getting Started
+
+In aws launch a bastion service either via spot request or standard on demand. by default
+`amz-ssh` looks for requests / instances tagged with `role:bastion`. The instance must be
+ accessible to your network, usually this mean has a public ip.
+ 
+ see [EC2 Instance Connect docs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-connect-methods.html) for more information
 
 ## How to use
 
-`amz-ssh` is designed to be run in an already authenticated environment eg via `aws-vault`.
+`amz-ssh` is designed to be run in an already authenticated environment eg via [aws-vault](https://github.com/99designs/aws-vault).
 
 Connect to a bastion launched by a spot request with a tag `role:bastion` in `eu-west-1
 `
 
-`aws-vault exec {profile} -- amz-ssh`
+`amz-ssh`
 
 Connect to a specific a specific instance
 
@@ -42,8 +49,3 @@ You can add as many `-d` flags as you want to continue chaining connections
 Specify the username and port
 
 `amz-ssh -d ubuntu@i-0eaa4d1c7f350216e:2222`
-
-## Disclaimer
-
-This tool was built purely to satisfy my requirements. It is not very flexible
-
