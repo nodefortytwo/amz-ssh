@@ -11,11 +11,13 @@ a tool that replaces aws/aws-ec2-instance-connect-cli.
 
 ## Getting Started
 
-In aws launch a bastion service either via spot request or standard on demand. by default
+In aws launch a bastion server compatible with EC2 Instance Connect either via spot request or standard on demand. by default
 `amz-ssh` looks for requests / instances tagged with `role:bastion`. The instance must be
  accessible to your network, usually this mean has a public ip.
  
- see [EC2 Instance Connect docs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-connect-methods.html) for more information
+see [EC2 Instance Connect docs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-connect-methods.html) for more information
+
+see this [simple Terraform bastion example](./examples/spot-bastion)
 
 ## How to use
 
