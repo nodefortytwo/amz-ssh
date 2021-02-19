@@ -38,7 +38,7 @@ func main() {
 				Name:        "region",
 				Aliases:     []string{"r"},
 				Destination: &region,
-				Value:       "eu-west-1",
+				EnvVars:     []string{"AWS_REGION"},
 			},
 			&cli.StringFlag{
 				Name:  "tag",
