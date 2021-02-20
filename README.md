@@ -34,7 +34,7 @@ Connect to a specific a specific instance
 
 Connect to a bastion with the tag `job:bastion-special`
 
-`amz-ssh -t job:bastion-special`
+`amz-ssh --tag job:bastion-special`
 
 Tunnel through the default bastion
 
