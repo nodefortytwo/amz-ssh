@@ -14,20 +14,18 @@ import (
 	awsSession "github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	connect "github.com/aws/aws-sdk-go/service/ec2instanceconnect"
-	"github.com/blang/semver"
-	"github.com/rhysd/go-github-selfupdate/selfupdate"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2" // imports as package "cli"
 
 	"github.com/nodefortytwo/amz-ssh/pkg/sshutils"
+	"github.com/nodefortytwo/amz-ssh/pkg/update"
 )
 
 var version = "0.0.0"
-var region = "eu-west-1"
 
 func main() {
 	rand.Seed(time.Now().Unix())
-	SetupSignalHandlers()
+	setupSignalHandlers()
 	app := &cli.App{
 		Name:    "amz-ssh",
 		Usage:   "connect to an ec2 instance via ec2 connect",
@@ -35,10 +33,10 @@ func main() {
 		Action:  run,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:        "region",
-				Aliases:     []string{"r"},
-				Destination: &region,
-				EnvVars:     []string{"AWS_REGION"},
+				Name:    "region",
+				Aliases: []string{"r"},
+				EnvVars: []string{"AWS_REGION"},
+				Value:   "eu-west-1",
 			},
 			&cli.StringFlag{
 				Name:  "tag",
@@ -85,7 +83,7 @@ func main() {
 			{
 				Name:   "update",
 				Usage:  "Update the cli",
-				Action: update,
+				Action: update.Handler,
 			},
 		},
 	}
@@ -96,7 +94,7 @@ func main() {
 
 	}
 }
-func SetupSignalHandlers() {
+func setupSignalHandlers() {
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -121,12 +119,20 @@ func run(c *cli.Context) error {
 		return fmt.Errorf("%s is not a valid tag definition, use key:value", c.String("tag"))
 	}
 
-	instanceID, err := resolveBastionInstanceID(c.String("instance-id"), tagName, tagValue)
-	if err != nil {
-		return err
+	ec2Client := ec2Client(c.String("region"))
+	connectClient := connectClient(c.String("region"))
+
+	instanceID := c.String("instance-id")
+	if instanceID == "" {
+		var err error
+		instanceID, err = resolveBastionInstanceID(ec2Client, tagName, tagValue)
+		if err != nil {
+			return err
+		}
 	}
+
 	bastionAddr := fmt.Sprintf("%s@%s:%d", c.String("user"), instanceID, c.Int("port"))
-	bastionEndpoint, err := sshutils.NewEC2Endpoint(bastionAddr, ec2Client(), connectClient())
+	bastionEndpoint, err := sshutils.NewEC2Endpoint(bastionAddr, ec2Client, connectClient)
 	if err != nil {
 		return err
 	}
@@ -144,7 +150,7 @@ func run(c *cli.Context) error {
 	}
 
 	for _, ep := range c.StringSlice("destination") {
-		destEndpoint, err := sshutils.NewEC2Endpoint(ep, ec2Client(), connectClient())
+		destEndpoint, err := sshutils.NewEC2Endpoint(ep, ec2Client, connectClient)
 		if err != nil {
 			return err
 		}
@@ -155,8 +161,8 @@ func run(c *cli.Context) error {
 	return sshutils.Connect(chain...)
 }
 
-func getSpotRequestByTag(tagName, tagValue string) (*ec2.DescribeSpotInstanceRequestsOutput, error) {
-	return ec2Client().DescribeSpotInstanceRequests(&ec2.DescribeSpotInstanceRequestsInput{
+func getSpotRequestByTag(ec2Client *ec2.EC2, tagName, tagValue string) (*ec2.DescribeSpotInstanceRequestsOutput, error) {
+	return ec2Client.DescribeSpotInstanceRequests(&ec2.DescribeSpotInstanceRequestsInput{
 		Filters: []*ec2.Filter{
 			{
 				Name:   aws.String("tag:" + tagName),
@@ -174,8 +180,8 @@ func getSpotRequestByTag(tagName, tagValue string) (*ec2.DescribeSpotInstanceReq
 	})
 }
 
-func getInstanceByTag(tagName, tagValue string) (*ec2.DescribeInstancesOutput, error) {
-	return ec2Client().DescribeInstances(&ec2.DescribeInstancesInput{
+func getInstanceByTag(ec2Client *ec2.EC2, tagName, tagValue string) (*ec2.DescribeInstancesOutput, error) {
+	return ec2Client.DescribeInstances(&ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
 			{
 				Name:   aws.String("tag:" + tagName),
@@ -189,13 +195,9 @@ func getInstanceByTag(tagName, tagValue string) (*ec2.DescribeInstancesOutput, e
 	})
 }
 
-func resolveBastionInstanceID(instanceID, tagName, tagValue string) (string, error) {
-	if instanceID != "" {
-		return instanceID, nil
-	}
-
+func resolveBastionInstanceID(ec2Client *ec2.EC2, tagName, tagValue string) (string, error) {
 	log.Info("Looking for bastion spot request")
-	siro, err := getSpotRequestByTag(tagName, tagValue)
+	siro, err := getSpotRequestByTag(ec2Client, tagName, tagValue)
 	if err != nil {
 		return "", err
 	}
@@ -205,7 +207,7 @@ func resolveBastionInstanceID(instanceID, tagName, tagValue string) (string, err
 	}
 
 	log.Info("No spot requests found, looking for instance directly")
-	dio, err := getInstanceByTag(tagName, tagValue)
+	dio, err := getInstanceByTag(ec2Client, tagName, tagValue)
 	if err != nil {
 		return "", err
 	}
@@ -216,10 +218,9 @@ func resolveBastionInstanceID(instanceID, tagName, tagValue string) (string, err
 	}
 
 	return "", errors.New("unable to find any valid bastion instances")
-	// TODO: look for asg by tag
 }
 
-func ec2Client() *ec2.EC2 {
+func ec2Client(region string) *ec2.EC2 {
 	sess, err := awsSession.NewSession(&aws.Config{
 		Region: aws.String(region),
 	})
@@ -230,7 +231,7 @@ func ec2Client() *ec2.EC2 {
 	return ec2.New(sess)
 }
 
-func connectClient() *connect.EC2InstanceConnect {
+func connectClient(region string) *connect.EC2InstanceConnect {
 	sess, err := awsSession.NewSession(&aws.Config{
 		Region: aws.String(region),
 	})
@@ -239,22 +240,4 @@ func connectClient() *connect.EC2InstanceConnect {
 	}
 
 	return connect.New(sess)
-}
-
-func update(c *cli.Context) error {
-	v := semver.MustParse(c.App.Version)
-	latest, err := selfupdate.UpdateSelf(v, "nodefortytwo/amz-ssh")
-	if err != nil {
-		log.Println("Binary update failed:", err)
-		return nil
-	}
-	if latest.Version.Equals(v) {
-		// latest version is the same as current version. It means current binary is up to date.
-		log.Println("Current binary is the latest version", version)
-	} else {
-		log.Println("Successfully updated to version", latest.Version)
-		log.Println("Release note:\n", latest.ReleaseNotes)
-	}
-
-	return nil
 }

@@ -21,7 +21,7 @@ see this [simple Terraform bastion example](./examples/spot-bastion)
 
 ## How to use
 
-`amz-ssh` is designed to be run in an already authenticated environment eg via [aws-vault](https://github.com/99designs/aws-vault).
+`amz-ssh` is designed to be run in an already authenticated environment eg via [aws-vault](https://github.com/99designs/aws-vault) or with default credentials, it does not, and will never, support assuming roles internally.
 
 Connect to a bastion launched by a spot request with a tag `role:bastion` in `eu-west-1
 `
